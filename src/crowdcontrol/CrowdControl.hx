@@ -1,22 +1,25 @@
 package crowdcontrol;
 
+import haxe.SysTools;
 import haxe.Http;
 import haxe.Json;
 import haxe.Timer;
 import haxe.net.WebSocket;
 import jwt.JWT;
-import openfl.Lib;
-import openfl.net.URLRequest;
 
 class CrowdControl
 {
-	private static inline var SOCKET_URL:String = "wss://pubsub.crowdcontrol.live";
+	private static inline var SOCKET_URL:String = "wss://pubsub.crowdcontrol.live/";
 
 	private static inline var AUTH_URL:String = "https://auth.crowdcontrol.live/?connectionID=";
 
+	private static inline var HTTP_URL:String = "https://trpc.crowdcontrol.live/";
+
 	private static var ccUID:String = "";
 
-	public static var Status:CCStatus;
+	public static var Status:CCStatus = CCStatus.NONE;
+
+	public static var SessionStatus:CCStatus = CCStatus.NONE;
 
 	private static var timer:Timer;
 
@@ -34,7 +37,13 @@ class CrowdControl
 	private static var Effects:Map<String, Void->Bool> = [];
 
 	private static var MAX_TRIES:Int = 5;
-	private static var MAX_TIME:Int = 60000;
+	private static var MAX_TIME:Float = 2400000;
+
+	private static var startTime:Float=0;
+	private static var sessionStartTime:Float=0;
+
+	private static var authToken:String;
+	private static var sessionID:String;
 
 	/**
 	 * Call this to initialize the Crowd Control System
@@ -45,6 +54,9 @@ class CrowdControl
 	{
 		if (Status != CCStatus.NONE)
 			return;
+
+		Status = CCStatus.INITIALIZING;
+		startTime = Date.now().getTime();
 
 		if (GamePackID == "")
 		{
@@ -60,7 +72,14 @@ class CrowdControl
 		{
 			trace('open!');
 
-			sendWhoAmI();
+			if (authToken != null)
+			{
+				subscribe();
+			}
+			else
+			{
+				sendWhoAmI();
+			}
 		}
 
 		ws.onmessageString = function(message)
@@ -77,7 +96,7 @@ class CrowdControl
 			}
 			else if (response.type == "login-success")
 			{
-				var authToken = response.payload.token;
+				authToken = response.payload.token;
 
 				var userData:Dynamic = JWT.extract(authToken);
 
@@ -96,7 +115,7 @@ class CrowdControl
 			{
 				if (Effects.exists(response.payload.effect.effectID))
 				{
-					EffectQueue.push(new EffectRequest(response.payload.effect.effectID));
+					EffectQueue.push(new EffectRequest(response.payload.effect.effectID), response.payload.effect.duration);
 				}
 			}
 		};
@@ -105,13 +124,110 @@ class CrowdControl
 		timer.run = function()
 		{
 			ws.process();
+
+			if (Status == CCStatus.INITIALIZING)
+			{
+				if (Date.now().getTime() - startTime > MAX_TIME)
+				{
+					Status = CCStatus.NONE;
+					startTime = 0;
+					throw("Crowd Control failed to initialize in time");
+					return;
+				}
+			}
+			else if (Status == CCStatus.INITIALIZED && SessionStatus == CCStatus.INITIALIZING)
+			{
+				if (Date.now().getTime() - sessionStartTime > MAX_TIME)
+				{
+					SessionStatus = CCStatus.NONE;
+					sessionStartTime = 0;
+					throw("Crowd Control failed to start session in time");
+					return;
+				}
+			}
+
 			processEffects();
 		};
 	}
 
+	public static function StartSession():Void
+	{
+		if (SessionStatus != CCStatus.NONE)
+			return;
+
+		if (Status != CCStatus.INITIALIZED)
+		{
+			throw("Crowd Control has not been initialized yet");
+			return;
+		}
+
+		SessionStatus = CCStatus.INITIALIZING;
+		sessionStartTime = Date.now().getTime();
+		sendData(HTTP_URL,"gameSession.startSession", Json.stringify({gamePackID: GamePack, effectReportArgs: []}), (err)->{
+			throw("Failed to start session: " + err);
+		}, (r)->{	
+			
+			var response = Json.parse(r);
+			sessionID = response.result.data.gameSessionID;
+			if (sessionID != "")
+			{
+				SessionStatus = CCStatus.INITIALIZED;
+
+				
+			}
+			else
+			{
+				throw("Failed to start session: - no session ID returned");
+			}
+		});
+	}
+
+	public static function StopSession():Void
+	{
+		if (Status != CCStatus.INITIALIZED)
+		{
+			throw("Crowd Control has not been initialized yet");
+			return;
+		}
+
+		if (SessionStatus != CCStatus.INITIALIZED)
+		{
+			throw("Session has not been initialized yet");
+			return;
+		}
+
+		SessionStatus = CCStatus.NONE;
+		sendData(HTTP_URL,"gameSession.stopSession", Json.stringify({gameSessionID: sessionID}), (err)->{
+			throw("Failed to stop session: " + err);
+		}, (r)->{	
+			
+			var response = Json.parse(r);
+			trace(response);
+		});
+	}
+
+	private static function sendData(URL:String, Action:String, Data:String, OnError:String->Void, OnData:String->Void):Void
+	{
+		#if (target.threaded && !hl)
+		sys.thread.Thread.create(() -> {
+		#end
+		var url:String = URL + Action + "?ref=" + Date.now().getTime();
+		var h:Http = new Http(url);
+		h.setHeader("Authorization", "cc-auth-token " + authToken);
+		h.onError = OnError;
+		h.onData = OnData;
+
+		h.setPostData(Data);
+
+		h.request(true);
+		#if (target.threaded && !hl)
+		});
+		#end
+	}
+
 	private static function processEffects():Void
 	{
-		if (Paused)
+		if (Paused || Status != CCStatus.INITIALIZED || SessionStatus != CCStatus.INITIALIZED)
 			return;
 
 		for (eff in EffectQueue)
@@ -168,7 +284,22 @@ class CrowdControl
 		// if the URL does not already start with "http://" or "https://", add it.
 		if (!~/^https?:\/\//.match(URL))
 			prefix = "http://";
-		Lib.getURL(new URLRequest(prefix + URL), Target);
+		//	Lib.getURL(new URLRequest(prefix + URL), Target);
+		#if js
+		js.Browser.window.open(prefix + URL, Target);
+		#elseif Sys
+		switch (Sys.systemName())
+		{
+			case "Linux", "BSD":
+				Sys.command("xdg-open", [prefix + URL]);
+			case "Mac":
+				Sys.command("open", [prefix + URL]);
+			case "Windows":
+				Sys.command("start", [prefix + URL]);
+			default:
+		}
+		#end
+		#end
 	}
 
 	/**
@@ -177,10 +308,11 @@ class CrowdControl
 	 * 
 	 * @param effectID		The ID of the effect. This is what you will use to trigger the effect.
 	 * @param effect 		The function that will be called when the effect is triggered. 
-	 * 						This function should not take any parameters, but return a TRUE if the 
-	 * 						effect happened successfully, otherwise FALSE
+	 * 						This function should take a Float, which will be the duration of the 
+	 * 						effect (if it has one), and return a TRUE if the effect happened 
+	 * 						successfully, otherwise FALSE
 	 */
-	public static function AddEffect(effectID:String, effect:Void->Bool):Void
+	public static function AddEffect(effectID:String, effect:Float->Bool):Void
 	{
 		Effects.set(effectID, effect);
 	}
@@ -245,12 +377,14 @@ class EffectRequest
 	public var effectID(default, null):String;
 	public var effectStatus:EffectStatus;
 	public var tries:Int;
+	public var duration:Float;
 
-	public function new(effectID:String)
+	public function new(effectID:String, Duration:Float = 0)
 	{
 		this.effectID = effectID;
 		this.effectStatus = EffectStatus.PENDING;
 		this.tries = 0;
+		this.duration = Duration;
 	}
 }
 
