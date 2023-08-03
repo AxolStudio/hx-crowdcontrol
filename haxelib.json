@@ -1,0 +1,21 @@
+{
+    "name": "hx-crowdcontrol",
+    "version": "0.0.1",
+    "releasenote": "Initial Release",
+    "description": "Haxe Library for Crowd Control [https://crowdcontrol.live/]",
+    "url": "https://github.com/AxolStudio/hx-crowdcontrol",
+    "license": "BSD",
+    "classPath": "src",
+    "tags": [
+        "crowdcontrol",
+        "twitch"
+    ],
+    "contributors": [
+        "AxolStudio"
+    ],
+    "dependencies": {
+        "colyseus-websocket": "",
+        "openfl": "",
+        "jwt": ""
+    }
+}
