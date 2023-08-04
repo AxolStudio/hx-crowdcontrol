@@ -18,8 +18,10 @@ class CrowdControl
 
 	private static var ccUID:String = "";
 
+	/* the current status of the Crowd Control System when = CCStatus.INITIALIZED then it's ready to be used.*/
 	public static var Status:CCStatus = CCStatus.NONE;
 
+	/* the current status of the Crowd Control Session when = CCStatus.INITIALIZED then it's ready to be used.*/
 	public static var SessionStatus:CCStatus = CCStatus.NONE;
 
 	private static var timer:Timer;
@@ -49,6 +51,9 @@ class CrowdControl
 	private static var lastTime:Float =0;
 	private static var elapsed:Float = 0;
 
+	/* Do you want to see all the responses? */
+	public static var verbose:Bool = false;
+
 	/**
 	 * Call this to initialize the Crowd Control System
 	 * 
@@ -70,12 +75,10 @@ class CrowdControl
 
 		GamePack = GamePackID;
 
-		ws = WebSocket.create(SOCKET_URL, null, null, true);
+		ws = WebSocket.create(SOCKET_URL, null, null, verbose);
 
 		ws.onopen = function()
 		{
-			trace('open!');
-
 			if (authToken != "")
 			{
 				subscribe();
@@ -90,7 +93,8 @@ class CrowdControl
 		{
 			var response = Json.parse(message);
 
-			trace(response);
+			if (verbose)
+				trace("Crowd Control Websocket Response: " + response);
 
 			if (response.type == "whoami")
 			{
@@ -169,6 +173,10 @@ class CrowdControl
 
 	}
 
+	/**
+	 * This fumction starts a new session. Must be done after the Crowd Control System has been initialized
+	 * and before any requests can be recieved.
+	 */
 	public static function StartSession():Void
 	{
 		if (SessionStatus != CCStatus.NONE)
@@ -184,15 +192,16 @@ class CrowdControl
 		sessionStartTime = haxe.Timer.stamp();
 		sendData(HTTP_URL,"gameSession.startSession", Json.stringify({gamePackID: GamePack, effectReportArgs: []}), (err)->{
 			throw("Failed to start session: " + err);
-		}, (r)->{	
+		}, (r)->{
+			
+			if (verbose)
+				trace("Crowd Control Session Start Response: " + r);
 			
 			var response = Json.parse(r);
 			sessionID = response.result.data.gameSessionID;
 			if (sessionID != "")
 			{
 				SessionStatus = CCStatus.INITIALIZED;
-
-				
 			}
 			else
 			{
@@ -201,27 +210,29 @@ class CrowdControl
 		});
 	}
 
+	/**
+	 * This function stops any active sessions.
+	 * You should make sure to do this before the application closes!
+	 */
 	public static function StopSession():Void
 	{
 		if (Status != CCStatus.INITIALIZED)
 		{
-			//throw("Crowd Control has not been initialized yet");
 			return;
 		}
 
 		if (SessionStatus != CCStatus.INITIALIZED)
 		{
-			//throw("Session has not been initialized yet");
 			return;
 		}
 
-		SessionStatus = CCStatus.NONE;
 		sendData(HTTP_URL,"gameSession.stopSession", Json.stringify({gameSessionID: sessionID}), (err)->{
 			throw("Failed to stop session: " + err);
 		}, (r)->{	
-			
+			SessionStatus = CCStatus.NONE;
 			var response = Json.parse(r);
-			trace(response);
+			if (verbose)
+				trace("Crowd Control Session Stop Response: " + response);
 		});
 	}
 
@@ -317,7 +328,6 @@ class CrowdControl
 			}
 		}
 
-		// remove all effects that have EffectStatus.SUCCESS or EffectStatus.FAILED
 		EffectQueue = EffectQueue.filter(function(eff:EffectRequest):Bool
 		{
 			return eff.effectStatus == EffectStatus.PENDING ||  eff.effectStatus == EffectStatus.STARTED || eff.effectStatus == EffectStatus.ENDING;
@@ -358,7 +368,6 @@ class CrowdControl
 		}
 		else
 		{
-			// send unpause
 			for( e in EffectQueue)
 			{
 				if (e.duration > 0 && e.effectStatus != FAILED)
@@ -395,8 +404,6 @@ class CrowdControl
 			data: responseData
 		});
 
-		trace(responseBody);
-
 		ws.sendString(responseBody);
 
 	}
@@ -414,7 +421,6 @@ class CrowdControl
 		// if the URL does not already start with "http://" or "https://", add it.
 		if (!~/^https?:\/\//.match(URL))
 			prefix = "http://";
-		//	Lib.getURL(new URLRequest(prefix + URL), Target);
 		#if js
 		js.Browser.window.open(prefix + URL, Target);
 		#else
@@ -467,10 +473,10 @@ class Effect {
 
 class User
 {
-	public var originID(default, null):String;
-	public var profileType(default, null):UserIDType;
-	public var ccUID(default, null):String;
-	public var name(default, null):String;
+	public var originID(default, null):String="";
+	public var profileType(default, null):UserIDType = UserIDType.TWITCH;
+	public var ccUID(default, null):String="";
+	public var name(default, null):String="";
 
 	public function new(originID:String, profileType:UserIDType, ccUID:String, name:String)
 	{
@@ -500,6 +506,8 @@ class User
 @:enum abstract UserIDType(String)
 {
 	var TWITCH = "twitch";
+	var DISCORD = "discord";
+	var YOUTUBE = "youtube";
 }
 
 @:enum abstract CCStatus(Int)
