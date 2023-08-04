@@ -2,4 +2,5 @@
 <project>
     <haxelib name="colyseus-websocket" />
     <haxelib name="jwt" />
+    <haxelib name="uuid" />
 </project>

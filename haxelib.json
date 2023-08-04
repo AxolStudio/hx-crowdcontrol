@@ -15,6 +15,7 @@
     ],
     "dependencies": {
         "colyseus-websocket": "",
-        "jwt": ""
+        "jwt": "",
+        "uuid": ""
     }
 }

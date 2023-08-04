@@ -1,11 +1,12 @@
 package crowdcontrol;
 
-import haxe.SysTools;
 import haxe.Http;
 import haxe.Json;
+import haxe.SysTools;
 import haxe.Timer;
 import haxe.net.WebSocket;
 import jwt.JWT;
+import uuid.Uuid;
 
 class CrowdControl
 {
@@ -30,20 +31,23 @@ class CrowdControl
 	private static var GamePack:String = "";
 
 	/* While Paused, the Crowd Control System will not process any effects - they will just keep getting put into the queue. */
-	public static var Paused:Bool = true;
+	public static var Paused(default, set):Bool = true;
 
 	private static var EffectQueue:Array<EffectRequest> = [];
 
-	private static var Effects:Map<String, Void->Bool> = [];
+	private static var Effects:Map<String, Effect> = [];
 
 	private static var MAX_TRIES:Int = 5;
-	private static var MAX_TIME:Float = 2400000;
+	private static var MAX_TIME:Float = 240;
 
 	private static var startTime:Float=0;
 	private static var sessionStartTime:Float=0;
 
-	private static var authToken:String;
-	private static var sessionID:String;
+	private static var authToken:String="";
+	private static var sessionID:String="";
+
+	private static var lastTime:Float =0;
+	private static var elapsed:Float = 0;
 
 	/**
 	 * Call this to initialize the Crowd Control System
@@ -56,7 +60,7 @@ class CrowdControl
 			return;
 
 		Status = CCStatus.INITIALIZING;
-		startTime = Date.now().getTime();
+		startTime = haxe.Timer.stamp();
 
 		if (GamePackID == "")
 		{
@@ -72,7 +76,7 @@ class CrowdControl
 		{
 			trace('open!');
 
-			if (authToken != null)
+			if (authToken != "")
 			{
 				subscribe();
 			}
@@ -115,19 +119,26 @@ class CrowdControl
 			{
 				if (Effects.exists(response.payload.effect.effectID))
 				{
-					EffectQueue.push(new EffectRequest(response.payload.effect.effectID), response.payload.effect.duration);
+					EffectQueue.push(new EffectRequest(response.payload.effect.effectID, response.payload.requestID, response.payload.effect.duration));
 				}
+				else
+				{
+					sendStatus(FAIL_PERMANENT, response.payload.effect.requestID);
+				}
+
 			}
 		};
 
 		timer = new Timer(100);
 		timer.run = function()
 		{
+			updateTimes();
+			
 			ws.process();
 
 			if (Status == CCStatus.INITIALIZING)
 			{
-				if (Date.now().getTime() - startTime > MAX_TIME)
+				if (haxe.Timer.stamp() - startTime > MAX_TIME)
 				{
 					Status = CCStatus.NONE;
 					startTime = 0;
@@ -137,7 +148,7 @@ class CrowdControl
 			}
 			else if (Status == CCStatus.INITIALIZED && SessionStatus == CCStatus.INITIALIZING)
 			{
-				if (Date.now().getTime() - sessionStartTime > MAX_TIME)
+				if (haxe.Timer.stamp() - sessionStartTime > MAX_TIME)
 				{
 					SessionStatus = CCStatus.NONE;
 					sessionStartTime = 0;
@@ -148,6 +159,14 @@ class CrowdControl
 
 			processEffects();
 		};
+	}
+
+	private static function updateTimes():Void
+	{
+		var currTime:Float = haxe.Timer.stamp();
+		elapsed = currTime - lastTime;
+		lastTime = currTime;
+
 	}
 
 	public static function StartSession():Void
@@ -162,7 +181,7 @@ class CrowdControl
 		}
 
 		SessionStatus = CCStatus.INITIALIZING;
-		sessionStartTime = Date.now().getTime();
+		sessionStartTime = haxe.Timer.stamp();
 		sendData(HTTP_URL,"gameSession.startSession", Json.stringify({gamePackID: GamePack, effectReportArgs: []}), (err)->{
 			throw("Failed to start session: " + err);
 		}, (r)->{	
@@ -186,13 +205,13 @@ class CrowdControl
 	{
 		if (Status != CCStatus.INITIALIZED)
 		{
-			throw("Crowd Control has not been initialized yet");
+			//throw("Crowd Control has not been initialized yet");
 			return;
 		}
 
 		if (SessionStatus != CCStatus.INITIALIZED)
 		{
-			throw("Session has not been initialized yet");
+			//throw("Session has not been initialized yet");
 			return;
 		}
 
@@ -211,7 +230,7 @@ class CrowdControl
 		#if (target.threaded && !hl)
 		sys.thread.Thread.create(() -> {
 		#end
-		var url:String = URL + Action + "?ref=" + Date.now().getTime();
+		var url:String = URL + Action + "?ref=" + Std.string(haxe.Timer.stamp()*1000);
 		var h:Http = new Http(url);
 		h.setHeader("Authorization", "cc-auth-token " + authToken);
 		h.onError = OnError;
@@ -230,13 +249,26 @@ class CrowdControl
 		if (Paused || Status != CCStatus.INITIALIZED || SessionStatus != CCStatus.INITIALIZED)
 			return;
 
+		var effect:Effect;
 		for (eff in EffectQueue)
 		{
 			if (eff.effectStatus == EffectStatus.PENDING)
 			{
-				if (Effects.get(eff.effectID)())
+				effect = Effects.get(eff.effectID);
+				if (effect.onStart())
 				{
-					eff.effectStatus = EffectStatus.SUCCESS;
+					if (eff.duration > 0)
+					{
+						eff.effectStatus = EffectStatus.STARTED;
+						
+						sendStatus(TIMED_BEGIN, eff.requestID);
+					}
+					else
+					{
+						eff.effectStatus = EffectStatus.SUCCESS;
+						
+						sendStatus(SUCCESS, eff.requestID);
+					}
 				}
 				else
 				{
@@ -244,6 +276,42 @@ class CrowdControl
 					if (eff.tries >= MAX_TRIES)
 					{
 						eff.effectStatus = EffectStatus.FAILED;
+						
+						sendStatus(FAIL_TEMPORARY, eff.requestID);
+
+					}
+				}
+			}
+			else if (eff.effectStatus == EffectStatus.STARTED)
+			{
+				eff.duration-=elapsed;
+				if (eff.duration <= 0)
+				{
+					eff.effectStatus = EffectStatus.ENDING;
+					eff.tries = 0;
+				}
+					
+				
+			}
+			else if (eff.effectStatus == EffectStatus.ENDING)
+			{
+				effect = Effects.get(eff.effectID);
+				if (effect.onEnd())
+				{
+					
+					eff.effectStatus = EffectStatus.SUCCESS;
+
+					sendStatus(TIMED_END, eff.requestID);
+					
+				}
+				else
+				{
+					eff.tries++;
+					if (eff.tries >= MAX_TRIES)
+					{
+						eff.effectStatus = EffectStatus.FAILED;
+
+						sendStatus(FAIL_TEMPORARY, eff.requestID);
 					}
 				}
 			}
@@ -252,7 +320,7 @@ class CrowdControl
 		// remove all effects that have EffectStatus.SUCCESS or EffectStatus.FAILED
 		EffectQueue = EffectQueue.filter(function(eff:EffectRequest):Bool
 		{
-			return eff.effectStatus == EffectStatus.PENDING;
+			return eff.effectStatus == EffectStatus.PENDING ||  eff.effectStatus == EffectStatus.STARTED || eff.effectStatus == EffectStatus.ENDING;
 		});
 	}
 
@@ -271,6 +339,68 @@ class CrowdControl
 		}));
 	}
 
+	private static function set_Paused(Value:Bool):Bool
+	{
+		if (Value == Paused)
+			return Paused;
+
+		Paused = Value;
+
+		if (Paused)
+		{
+			for( e in EffectQueue)
+			{
+				if (e.duration > 0 && e.effectStatus != FAILED)
+				{
+					sendStatus(TIMED_PAUSE, e.requestID);	
+				}
+			}
+		}
+		else
+		{
+			// send unpause
+			for( e in EffectQueue)
+			{
+				if (e.duration > 0 && e.effectStatus != FAILED)
+				{
+					sendStatus(TIMED_RESUME, e.requestID);	
+				}
+			}
+		}
+
+		return Paused;
+	}
+
+	private static function sendStatus(Status:ResponseStatus, EffectID:String):Void
+	{
+		var randID:String  = Uuid.v4();
+		var responseData:String = Json.stringify({
+			token: authToken,
+			call: {
+				method: "effectResponse",
+				args: [{
+					request: EffectID,
+					id: randID,
+					stamp: Date.now().getTime() ,
+					status: Status,
+					message:""
+				}],
+				id : randID,
+				type:"call"
+			}
+		});
+
+		var responseBody:String = Json.stringify({
+			action: "rpc",
+			data: responseData
+		});
+
+		trace(responseBody);
+
+		ws.sendString(responseBody);
+
+	}
+
 	/**
 	 * Opens a web page, by default a new tab or window. If the URL does not
 	 * already start with `"http://"` or `"https://"`, it gets added automatically.
@@ -287,18 +417,8 @@ class CrowdControl
 		//	Lib.getURL(new URLRequest(prefix + URL), Target);
 		#if js
 		js.Browser.window.open(prefix + URL, Target);
-		#elseif Sys
-		switch (Sys.systemName())
-		{
-			case "Linux", "BSD":
-				Sys.command("xdg-open", [prefix + URL]);
-			case "Mac":
-				Sys.command("open", [prefix + URL]);
-			case "Windows":
-				Sys.command("start", [prefix + URL]);
-			default:
-		}
-		#end
+		#else
+		Sys.command("start", [prefix + URL]);
 		#end
 	}
 
@@ -307,14 +427,15 @@ class CrowdControl
 	 * Note: duplicate effect ids will be ovewritten.
 	 * 
 	 * @param effectID		The ID of the effect. This is what you will use to trigger the effect.
-	 * @param effect 		The function that will be called when the effect is triggered. 
-	 * 						This function should take a Float, which will be the duration of the 
-	 * 						effect (if it has one), and return a TRUE if the effect happened 
+	 * @param onStart 		The function that will be called when the effect is triggered. 
+	 * 						This function should not take any parameters, and return a TRUE if the effect happened 
 	 * 						successfully, otherwise FALSE
+	 * @param onEnd 		The function that will be called when the effect is ended. It should not take any
+	 * 						parameters, and return TRUE if the effect ended successfully, otherwise FALSE.
 	 */
-	public static function AddEffect(effectID:String, effect:Float->Bool):Void
+	public static function AddEffect(effectID:String, onStart:Void->Bool, ?onEnd:Void->Bool):Void
 	{
-		Effects.set(effectID, effect);
+		Effects.set(effectID, new Effect(effectID, onStart, onEnd));
 	}
 
 	/**
@@ -326,6 +447,22 @@ class CrowdControl
 	{
 		Effects.remove(effectID);
 	}
+}
+
+
+class Effect {
+
+	public var name(default, null):String;
+	public var onStart(default, null):Void->Bool;
+	public var onEnd(default, null):Void->Bool;
+
+	public function new(name:String, onStart:Void->Bool, onEnd:Void->Bool)
+	{
+		this.name = name;
+		this.onStart = onStart;
+		this.onEnd = onEnd;
+	}
+
 }
 
 class User
@@ -374,17 +511,19 @@ class User
 
 class EffectRequest
 {
-	public var effectID(default, null):String;
-	public var effectStatus:EffectStatus;
-	public var tries:Int;
-	public var duration:Float;
+	public var effectID(default, null):String="";
+	public var effectStatus:EffectStatus= EffectStatus.PENDING;
+	public var tries:Int =0 ;
+	public var duration:Float=0;
+	public var requestID:String = "";
 
-	public function new(effectID:String, Duration:Float = 0)
+	public function new(effectID:String, RequestID:String, Duration:Float = 0)
 	{
 		this.effectID = effectID;
 		this.effectStatus = EffectStatus.PENDING;
 		this.tries = 0;
 		this.duration = Duration;
+		this.requestID = RequestID;
 	}
 }
 
@@ -393,4 +532,19 @@ class EffectRequest
 	var PENDING = 0;
 	var SUCCESS = 1;
 	var FAILED = 2;
+	var STARTED= 3;
+	var ENDED = 4;
+	var ENDING = 5;
+}
+
+@:enum abstract ResponseStatus(String)
+{
+	var SUCCESS = "success";
+	var TIMED_BEGIN = "timedBegin";
+	var TIMED_END = "timedEnd";
+	var TIMED_PAUSE	= "timedPause";
+	var TIMED_RESUME = "timedResume";
+	var FAIL_TEMPORARY = "failTemporary";
+	var FAIL_PERMANENT = "failPermanent";
+
 }
