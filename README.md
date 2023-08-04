@@ -4,8 +4,6 @@
 
 A [Crowd Control 2.0](https://crowdcontrol.live/) library for native [Haxe](https://haxe.org/).
 
-API docs are available here: [https://axolstudio.github.io/hx-crowdcontrol/](https://axolstudio.github.io/hx-crowdcontrol/).
-
 **⚠️ It is important to mention that you will need to contact Crowd Control to completely setup your game for it to work with this library.**
 
 ## Features
