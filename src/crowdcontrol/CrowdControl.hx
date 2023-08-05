@@ -79,7 +79,9 @@ class CrowdControl
 
 		GamePack = GamePackID;
 
-
+		#if (target.threaded )
+		sys.thread.Thread.create(() -> {
+		#end
 		ws = WebSocket.create(SOCKET_URL, null, null, verbose);
 
 		ws.onopen = function()
@@ -114,6 +116,10 @@ class CrowdControl
 				var userData:Dynamic = JWT.extract(authToken);
 
 				user = new User(userData.originID, userData.profileType, userData.ccUID, userData.name);
+
+				interactURL =  INTERACTION_URL + user.profileType + "/" + user.originID;
+				
+				trace("Crowd Control Interaction URL: " + interactURL);
 
 				subscribe();
 			}
@@ -168,6 +174,10 @@ class CrowdControl
 
 			processEffects();
 		};
+		
+		#if (target.threaded )
+		});
+		#end
 	}
 
 	private static function updateTimes():Void
@@ -183,7 +193,10 @@ class CrowdControl
 	 * and before any requests can be recieved.
 	 */
 	public static function StartSession():Void
-	{
+	{	
+		#if (target.threaded )
+		sys.thread.Thread.create(() -> {
+		#end
 		if (SessionStatus != CCStatus.NONE)
 			return;
 
@@ -208,12 +221,10 @@ class CrowdControl
 			{
 				SessionStatus = CCStatus.INITIALIZED;
 
-				interactURL =  INTERACTION_URL + user.profileType + "/" + user.originID;
 
 				if (verbose)
 				{
 					trace("Crowd Control Session Started: " + sessionID);
-					trace("Crowd Control Interaction URL: " + interactURL);
 				}
 			}
 			else
@@ -221,6 +232,9 @@ class CrowdControl
 				throw("Failed to start session: - no session ID returned");
 			}
 		});
+		#if (target.threaded )
+		});
+		#end
 	}
 
 	/**
@@ -251,7 +265,7 @@ class CrowdControl
 
 	private static function sendData(URL:String, Action:String, Data:String, OnError:String->Void, OnData:String->Void):Void
 	{
-		#if (target.threaded && !hl)
+		#if (target.threaded )
 		sys.thread.Thread.create(() -> {
 		#end
 		var url:String = URL + Action + "?ref=" + Std.string(haxe.Timer.stamp()*1000);
@@ -263,7 +277,7 @@ class CrowdControl
 		h.setPostData(Data);
 
 		h.request(true);
-		#if (target.threaded && !hl)
+		#if (target.threaded )
 		});
 		#end
 	}

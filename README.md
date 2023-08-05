@@ -111,6 +111,16 @@ The ideal scenario is to leave the library paused while in menus, and unpause on
 
 Specifying the proper places to pause/unpause your game is paramount to making sure that the user's requests are processed correctly.
 
+### Interaction URL
+
+```haxe
+trace(CrowdControl.InteractionURL);
+```
+
+Users can interact with your game through the Twitch Plugin, or, through the streamer's unique Interaction Portal. Once the library is initialized, you can get the URL to the Interaction Portal by accessing `CrowdControl.InteractionURL`.
+
+It would be useful to display this somewhere, perhaps in a dedicated Crowd Control interface, so the streamer can easily see it and copy/paste it elsewhere for their users to access.
+
 ### Debugging
 
 ```haxe
@@ -119,12 +129,113 @@ CrowdControl.verbose = true;
 
 If you want to see a lot more detail on the responses from Crowd Controls servers, you can turn verbose mode on. This will print out a lot of information to the console, so it is recommended to only use this when debugging.
 
+## Example Usage
+
+To demonstrate a simple use case, here are some of the modifications made to the [HaxeFlixel demo project *mode*](https://haxeflixel.com/demos/Mode/) to add Crowd Control support.
+
+Main.hx
+```haxe
+package;
+
+import haxe.Timer;
+import crowdcontrol.CrowdControl;
+import flixel.FlxG;
+import flixel.FlxGame;
+import flixel.math.FlxPoint;
+import openfl.Lib;
+import openfl.display.Sprite;
+
+class Main extends Sprite
+{
+	public static var PlayState:PlayState;
+
+	public function new()
+	{
+		super();
+		addChild(new FlxGame(320, 240, MenuState));
+
+      // NEW for Crowd Control ========================
+
+      // enable versbose mode for debugging
+		CrowdControl.verbose = true; 
+
+      // Initialize the library with your Game Pack ID - in this case, 
+      // we are using the Castlevania 3 Game Pack (because there is no mode 
+      // game pack and we're just testing)
+		CrowdControl.Initialize("Castlevania3");
+
+      // Add a one-off effect that will spawn an enemy near the player when a 
+      // user buys the "Increase Time by 100" effect called "timeup"
+		CrowdControl.AddEffect("timeup", () ->
+		{
+			var e:Enemy = PlayState._enemies.recycle(Enemy.new);
+			var mp:FlxPoint = PlayState._player.getMidpoint();
+			if (e != null)
+				e.init(Std.int(mp.x + (FlxG.random.float(10, 50) * FlxG.random.sign())), Std.int(mp.y + (FlxG.random.float(10, 50) * FlxG.random.sign())),
+					PlayState._enemyBullets, PlayState._littleGibs, PlayState._player);
+			return e != null; // return true if the enemy was spawned successfully
+		});
+
+      // Add a timed effect that will make the player invulnerable for 30 seconds when
+      // a user buys the "Invulnerability" effect called "invul"
+		CrowdControl.AddEffect("invul", () ->
+		{
+			PlayState._player.invulnerable = true;
+			return true;
+		}, () ->
+			{
+				PlayState._player.invulnerable = false;
+				return true;
+      });
+
+      // Add a timer to check for the library to be initialized and then automatically
+      // start a new session - in real practice you should give the player an interface
+      // to start/stop the session and show their interaction URL, but this is just a demo
+		var timer:Timer = new Timer(500);
+		timer.run = () ->
+		{
+			if (CrowdControl.Status == INITIALIZED && CrowdControl.SessionStatus == NONE)
+			{
+				CrowdControl.StartSession();
+				timer.stop();
+			}
+		};
+
+      // Stop the session when the application exits
+		Lib.application.onExit.add((_) ->
+		{
+			CrowdControl.StopSession();
+		});
+
+      // ========================================================
+	}
+}
+```
+
+Note: Some of the changes that are not shown include: 
+  * adding `CrowdControl.paused` to various places in the code to pause/unpause the library. You want to make sure that it is only unpaused during the actual gameplay, and paused when on the main menu or when the demo/eyecatch is playing.
+  * setting `Main.PlayState` to `this` when the `PlayState` is initialized to it can be accessed from other classes. 
+  * the places where `public` was added to variables and functions to expose them more easily for our purposes.
+  * the `Player.invulnerable` setter which turns the player red when `true` and back again on `false`, and the logic in `Player.hurt` to check for `invulnerable`.
+
+## Testing
+
+1. Run your game project and after calling `CrowdControl.Initialize` a browser window should open to allow you to sign in to Crowd Control via your Twitch, Discord, or YouTube account(if you are running your game in a browser, it may block the tab from opening, so you may need to allow popups).
+2. Open a new browser tab to your Crowd Control Interaction Portal (you can find the URL by calling `CrowdControl.InteractionURL` after the library has been initialized and it will be traced to the console).
+3. Login to the Portal with the same account you authenticated in-game.
+4. You can now order effects in the Portal and test them out in your game!
+
 # Change Log
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
+
+### 1.1.0
+#### Added 
+ - `CrowdControl.InteractionURL`
+ - Threading for effect processing
 
 ### 1.0.0
 #### Added
