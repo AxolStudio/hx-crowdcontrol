@@ -16,7 +16,7 @@ class CrowdControl
 
 	private static inline var HTTP_URL:String = "https://trpc.crowdcontrol.live/";
 
-	private static inline var INTERACTION_URL:String = "https://interact.crowdcontrol.live/#/"
+	private static inline var INTERACTION_URL:String = "https://interact.crowdcontrol.live/#/";
 
 	private static var ccUID:String = "";
 
@@ -208,7 +208,7 @@ class CrowdControl
 			{
 				SessionStatus = CCStatus.INITIALIZED;
 
-				interactURL =  INTERACTION_URL + user.profileType + "/" + user.originID
+				interactURL =  INTERACTION_URL + user.profileType + "/" + user.originID;
 
 				if (verbose)
 				{
