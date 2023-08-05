@@ -1,6 +1,6 @@
 {
     "name": "hx-crowdcontrol",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "releasenote": "Initial Release",
     "description": "Haxe Library for Crowd Control [https://crowdcontrol.live/]",
     "url": "https://github.com/AxolStudio/hx-crowdcontrol",
@@ -8,7 +8,10 @@
     "classPath": "src",
     "tags": [
         "crowdcontrol",
-        "twitch", "youtube", "discord", "streaming"
+        "twitch",
+        "youtube",
+        "discord",
+        "streaming"
     ],
     "contributors": [
         "AxolStudio"

@@ -16,6 +16,8 @@ class CrowdControl
 
 	private static inline var HTTP_URL:String = "https://trpc.crowdcontrol.live/";
 
+	private static inline var INTERACTION_URL:String = "https://interact.crowdcontrol.live/#/"
+
 	private static var ccUID:String = "";
 
 	/* the current status of the Crowd Control System when = CCStatus.INITIALIZED then it's ready to be used.*/
@@ -54,6 +56,8 @@ class CrowdControl
 	/* Do you want to see all the responses? */
 	public static var verbose:Bool = false;
 
+	public static var interactURL:String ="";
+
 	/**
 	 * Call this to initialize the Crowd Control System
 	 * 
@@ -75,6 +79,7 @@ class CrowdControl
 
 		GamePack = GamePackID;
 
+
 		ws = WebSocket.create(SOCKET_URL, null, null, verbose);
 
 		ws.onopen = function()
@@ -91,7 +96,7 @@ class CrowdControl
 
 		ws.onmessageString = function(message)
 		{
-			var response = Json.parse(message);
+			var response:Dynamic = Json.parse(message);
 
 			if (verbose)
 				trace("Crowd Control Websocket Response: " + response);
@@ -202,6 +207,14 @@ class CrowdControl
 			if (sessionID != "")
 			{
 				SessionStatus = CCStatus.INITIALIZED;
+
+				interactURL =  INTERACTION_URL + user.profileType + "/" + user.originID
+
+				if (verbose)
+				{
+					trace("Crowd Control Session Started: " + sessionID);
+					trace("Crowd Control Interaction URL: " + interactURL);
+				}
 			}
 			else
 			{
