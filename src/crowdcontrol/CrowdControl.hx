@@ -253,6 +253,7 @@ class CrowdControl
 			return;
 		}
 
+		clear();
 		sendData(HTTP_URL,"gameSession.stopSession", Json.stringify({gameSessionID: sessionID}), (err)->{
 			throw("Failed to stop session: " + err);
 		}, (r)->{	
@@ -359,6 +360,20 @@ class CrowdControl
 		{
 			return eff.effectStatus == EffectStatus.PENDING ||  eff.effectStatus == EffectStatus.STARTED || eff.effectStatus == EffectStatus.ENDING;
 		});
+	}
+
+	/**
+	 * Clears the effect queue and sends a FAIL_TEMPORARY response to all pending effects.
+	 * This should be called when a level ends or when it makes sense to wipe out all of the effects.
+	 * Not for paused games, etc.
+	 */
+	public static function clear():Void
+	{
+		for (e in EffectQueue)
+		{
+			sendStatus(FAIL_TEMPORARY, e.requestID);
+		}
+		EffectQueue = [];
 	}
 
 	private static function subscribe():Void

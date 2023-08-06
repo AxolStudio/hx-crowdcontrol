@@ -1,7 +1,7 @@
 {
     "name": "hx-crowdcontrol",
-    "version": "1.1.0",
-    "releasenote": "Minor tweaks.",
+    "version": "1.2.0",
+    "releasenote": "+ Added `clear` method",
     "description": "Haxe Library for Crowd Control [https://crowdcontrol.live/]",
     "url": "https://github.com/AxolStudio/hx-crowdcontrol",
     "license": "BSD",

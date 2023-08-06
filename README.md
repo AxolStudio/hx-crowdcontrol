@@ -121,6 +121,15 @@ Users can interact with your game through the Twitch Plugin, or, through the str
 
 It would be useful to display this somewhere, perhaps in a dedicated Crowd Control interface, so the streamer can easily see it and copy/paste it elsewhere for their users to access.
 
+### Clearing effects
+
+```haxe
+CrowdControl.clear();
+```
+
+You can clear all effects by calling `CrowdControl.clear()`. This will remove all effects that have been queued and have not finished yet, and will send the `FAILED_TEMPORARY` message back to Crowd Control for each effect.
+This should really only be used when a level or the game ends completely and you don't want timed effects or queued effects to sit and wait in the queue.
+
 ### Debugging
 
 ```haxe
